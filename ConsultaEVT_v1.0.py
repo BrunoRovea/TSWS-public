@@ -48,7 +48,7 @@ class Funcs():
         else:
             print('Falha ao conectar-se ao TSWS')
         # Inicializa no modo desenvolvimento
-        self.tsws = TSWS.setup('./config.json')
+        self.tsws = TSWS.setup('Dev')
 
     def toogle_snapshot(self):
         if not self.snapshot_running:
