@@ -10,18 +10,23 @@
     *U05*excit*Corr*Av*
 
     Problemas com o tag_search
+
+
 """
 
 #%%
 import tkinter as tk
 from tkinter import *
 from tkinter import ttk
+from tkinter import filedialog
+import glob
 from GSSLibs import TSWS, log
 import pandas as pd
 import datetime 
 from time import sleep
 import threading
 import re
+from time import sleep
 
 
 
@@ -35,7 +40,7 @@ class Funcs():
     # Limpa os campos das entrys especificadas
     def limpa_tela(self):
         # Nome destas entrys deve estar igual as entrys da def widgets
-        # self.nome_entry.delete(0, END)
+        self.step_amount_entry.delete(0, END)
         self.filtro_entry.delete(0, END)
         self.dinicio_entry.delete(0, END)
         self.dfim_entry.delete(0, END)
@@ -48,7 +53,7 @@ class Funcs():
         else:
             print('Falha ao conectar-se ao TSWS')
         # Inicializa no modo desenvolvimento
-        self.tsws = TSWS.setup('Dev')
+        self.tsws = TSWS.setup('./config.json')
 
     def toogle_snapshot(self):
         if not self.snapshot_running:
@@ -75,23 +80,41 @@ class Funcs():
         
         # Especificação da Tag a ser procurada (entrada do usuário), padrão Pi
         # entry.get() irá coletar a informação contida na entry na hora da execução desta linha
+        
         query = self.filtro_entry.get()
 
+        # Cria uma lista vazia que será appendada no for
+        response_list = []
+
         if self.snapshot_running:
+            # Caso ñ preencha o filtro, o arquivo lista_evt existe e foi carregado do excel
+            if query == '':
+                # Percorre a lista carregada do excel
+                for tag in self.tag_list:
+                    # Retorna o último valor registrado na tagname (rápido)
+                    value    = self.tsws.get.time_series_snapshot(tag)
+
+                    # Extrai o que interessa do json retornado pelo time_series_snapshot
+                    response = value.json()['timeSeriesResponse']
+
+                    # appenda a lista vazia criada anteriormente, em cada iteração do for
+                    response_list.append(response)
+
+                # Transforma a lista appendada no for em um dataframe a ser escrito na tela do tkinter
+                events = pd.DataFrame.from_dict(response_list)
+            else:
+                # Caso o campo do filtro esteja preenchido, procurar snapshot pelo filtro do usuário
+                tag_name = self.tsws.get.tag_search(query).json()['tagResponse'][0]['tagName']
+
+                # O dicionário contendo os dados do snapshot
+                value    = self.tsws.get.time_series_snapshot(tag_name)
+                response = value.json()['timeSeriesResponse']
+
+                # Força response a ser uma lista e converte-o para df
+                # Nesse caso, response é apenas um valor
+                events   = pd.DataFrame([response])
 
 
-            # Definição da tagname
-            # Esta função tag_search ñ está funcionando direito
-            # tag_name = self.tsws.get.tag_search(query).status_code
-            # print(tag_name)
-            tag_name = self.tsws.get.tag_search(query).json()['tagResponse'][0]['tagName']
-
-            # O dicionário contendo os dados do snapshot
-            value    = self.tsws.get.time_series_snapshot(tag_name)
-            response = value.json()['timeSeriesResponse']
-
-            # Força response a ser uma lista e converte-o para df
-            events   = pd.DataFrame([response])
 
             # Estabelece os índices do df segundo a lista do frame 3
             events['Índice'] = pd.Series(events.index)
@@ -126,104 +149,150 @@ class Funcs():
             self.listaEvt.column("#5", width=300)
             self.listaEvt.column("#6", width=100)
 
-
-
             # Adiciona o df events na lista criada no frame 3
             # Adiciona lunha por linha, percorrendo as row
             # lista.insert        
             for index, row in events.iterrows():
                 self.listaEvt.insert("", "end", values=(row['Índice'], row['Data'], row['Hora'], row['Local'], row['Evento'], row['Estado']))
 
+
+
             # Verifica se o botão "Snapshot" foi pressionado novamente
             if not self.snapshot_running:
                 return
 
-
-            self.root.after(1000, self.snapshot_loop)
+            self.root.after(5000, self.snapshot_loop)
 
     def buscar_evt(self):
-        # Função para detecção dos eventos qye possuem a string ' RET - ' na coluna Estado
+       # Função para detecção dos eventos qye possuem a string ' RET - ' na coluna Estado
         def contem_RET(texto):
             # Filtrar por RET -
             #return bool(re.search(r' RET - ', texto, flags=re.IGNORECASE))
             return bool(re.search(r' RET - | RECON - ', texto, flags=re.IGNORECASE))
-
+        
         # Limpa a lista
         self.listaEvt.delete(*self.listaEvt.get_children())
+
+
 
         # Especificação da Tag a ser procurada (entrada do usuário), padrão Pi
         # entry.get() irá coletar a informação contida na entry na hora da execução desta linha
         query = self.filtro_entry.get()
+
+
 
         # Especificação do range de data a ser procurado no formato especificado
         # YYYY/MM/DD hh:mm:ss
         # Na entry deve ser dd:mm:yyyy hh:mm:ss
         startTime = self.dinicio_entry.get()
         stopTime =  self.dfim_entry.get()
- 
+          
         # str2datetime
         # Formato que o TSWS entende
         startTime = datetime.datetime.strptime(startTime, "%d/%m/%Y %H:%M:%S")
         stopTime  = datetime.datetime.strptime(stopTime, "%d/%m/%Y %H:%M:%S")
 
-
-        # Extrai os dados nas condições anteriormente especificadas, isso é um dicionário
-        # Função feita pelo GSS
-        response = self.tsws.get.time_series_events(query, startTime, stopTime)
-        # No final das contas, response é um dicionário 
-        response = response.json()['timeSeriesResponse']
-
-        # Transforma response em DataFrame
-        events   = pd.DataFrame.from_dict(response)
-
-        # Especifica a coluna índice do dataframe
-        # Extrair as informações de Data, Hora, Local, Evento e Estado
-        events['índice'] = pd.Series(events.index)
-        events['Data']   = events['value'].str[:12]
-        events['Hora']   = events['value'].str[12:21]
-        events['Local']  = events['value'].str[21:30]
-        events['Evento'] = events['value'].str[30:79]
-        events['Estado'] = events['value'].str[79:]
-
-        # Contém True em todos os índices onde contém a string "- RET "
-        mascara = events['Estado'].apply(contem_RET)
-
-        # Nas linhas que contém - RET  tratar as colunas Hora Local e Evento de maneira adequada
-        events.loc[mascara, 'Hora']  = events.loc[mascara, 'Local'] + ' - ' + events.loc[mascara, 'Hora']
-        events.loc[mascara, 'Local'] = events.loc[mascara, 'Evento'].str[:9]
-        events.loc[mascara, 'Evento'] = events.loc[mascara, 'Evento'].str.slice(9)
-
-        # Definir as colunas que serão utilizadas
-        columns = ['índice', 'Data', 'Hora', 'Local', 'Evento', 'Estado']
-
-        # Categoriza o dataframe 
-        self.events = events[columns]
-
-        # Remove eventos identicos do df
-        self.events = events.drop_duplicates()
+        step_amount = self.step_amount_entry.get()
 
 
+        if step_amount != '':
+            # programar condição para quando o usuário não preenche step_amount
+            # step_amount = 5
+            step_amount = int(step_amount)
+            print(step_amount)
+            step = 'MINUTE'
+            tag_name = self.tsws.get.tag_search(query).json()['tagResponse'][0]['tagName']
+            response = self.tsws.get.time_series_fixed_step_range(tag_name,step,step_amount,startTime,stopTime)
+            response = response.json()['timeSeriesResponse']
+            
+            # Transforma response em DataFrame
+            events   = pd.DataFrame.from_dict(response)
+            events['índice'] = pd.Series(events.index)
+            
+            # Remove eventos identicos do df
+            self.events = events.drop_duplicates()
+            
 
-        # Especifica o nome de cada coluna
-        self.listaEvt.heading("#0", text="")
-        self.listaEvt.heading("#1", text='Índice')
-        self.listaEvt.heading("#2", text='Data')
-        self.listaEvt.heading("#3", text='Hora')
-        self.listaEvt.heading("#4", text='Local')
-        self.listaEvt.heading("#5", text='Alarme')
-        self.listaEvt.heading("#6", text='Estado')
-        
-        # Isso aq é meio confuso, divide o número 500 nas proporções de cada coluna
-        self.listaEvt.column("#0", width=1)
-        self.listaEvt.column("#1", width=60)
-        self.listaEvt.column("#2", width=100)
-        self.listaEvt.column("#3", width=100)
-        self.listaEvt.column("#4", width=100)
-        self.listaEvt.column("#5", width=300)
-        self.listaEvt.column("#6", width=500)
-        
-        for index, row in events.iterrows():
-            self.listaEvt.insert("", "end", values=(row['índice'], row['Data'], row['Hora'], row['Local'], row['Evento'], row['Estado']))
+
+            # Especifica o nome de cada coluna
+            self.listaEvt.heading("#0", text="")
+            self.listaEvt.heading("#1", text='índice')
+            self.listaEvt.heading("#2", text='Un Eng')
+            self.listaEvt.heading("#3", text='Valor Numérico')
+            self.listaEvt.heading("#4", text='Nome da TAG')
+            self.listaEvt.heading("#5", text='Data/Hora')
+            self.listaEvt.heading("#6", text='Valor')
+            
+            # Isso aq é meio confuso, divide o número 500 nas proporções de cada coluna
+            self.listaEvt.column("#0", width=1)
+            self.listaEvt.column("#1", width=60)
+            self.listaEvt.column("#2", width=60)
+            self.listaEvt.column("#3", width=150)
+            self.listaEvt.column("#4", width=300)
+            self.listaEvt.column("#5", width=150)
+            self.listaEvt.column("#6", width=150)
+
+            for index, row in events.iterrows():
+                # self.listaEvt.insert("", "end", values=(row['engUnit'], row['numericValue'], row['tagName'], row['timestamp'], row['value']))
+                self.listaEvt.insert("", "end", values=(row['índice'],row['engUnit'], row['numericValue'], row['tagName'], row['timestamp'], row['value']))     
+        else:
+            # Extrai os dados nas condições anteriormente especificadas, isso é um dicionário
+            # Função feita pelo GSS
+            response = self.tsws.get.time_series_events(query, startTime, stopTime)
+            # No final das contas, response é um dicionário 
+            response = response.json()['timeSeriesResponse']
+
+            # Transforma response em DataFrame
+            events   = pd.DataFrame.from_dict(response)
+
+            # Especifica a coluna índice do dataframe
+            # Extrair as informações de Data, Hora, Local, Evento e Estado
+            events['índice'] = pd.Series(events.index)
+            events['Data']   = events['value'].str[:12]
+            events['Hora']   = events['value'].str[12:21]
+            events['Local']  = events['value'].str[21:30]
+            events['Evento'] = events['value'].str[30:79]
+            events['Estado'] = events['value'].str[79:]
+
+            # Contém True em todos os índices onde contém a string "- RET "
+            mascara = events['Estado'].apply(contem_RET)
+
+            # Nas linhas que contém - RET  tratar as colunas Hora Local e Evento de maneira adequada
+            events.loc[mascara, 'Hora']  = events.loc[mascara, 'Local'] + ' - ' + events.loc[mascara, 'Hora']
+            events.loc[mascara, 'Local'] = events.loc[mascara, 'Evento'].str[:9]
+            events.loc[mascara, 'Evento'] = events.loc[mascara, 'Evento'].str.slice(9)
+
+            # Definir as colunas que serão utilizadas
+            columns = ['índice', 'Data', 'Hora', 'Local', 'Evento', 'Estado']
+
+            # Categoriza o dataframe 
+            self.events = events[columns]
+
+            # Remove eventos identicos do df
+            self.events = events.drop_duplicates()
+
+
+
+            # Especifica o nome de cada coluna
+            self.listaEvt.heading("#0", text="")
+            self.listaEvt.heading("#1", text='Índice')
+            self.listaEvt.heading("#2", text='Data')
+            self.listaEvt.heading("#3", text='Hora')
+            self.listaEvt.heading("#4", text='Local')
+            self.listaEvt.heading("#5", text='Alarme')
+            self.listaEvt.heading("#6", text='Estado')
+            
+            # Isso aq é meio confuso, divide o número 500 nas proporções de cada coluna
+            self.listaEvt.column("#0", width=1)
+            self.listaEvt.column("#1", width=60)
+            self.listaEvt.column("#2", width=100)
+            self.listaEvt.column("#3", width=100)
+            self.listaEvt.column("#4", width=100)
+            self.listaEvt.column("#5", width=300)
+            self.listaEvt.column("#6", width=500)
+            
+            for index, row in events.iterrows():
+                self.listaEvt.insert("", "end", values=(row['índice'], row['Data'], row['Hora'], row['Local'], row['Evento'], row['Estado']))
 
     def export(self):
         # Exporta o dataframe events para xlsx
@@ -233,7 +302,7 @@ class Funcs():
         self.events_sem_indice = self.events_sem_indice.drop('índice', axis=1)
         self.events_sem_indice.to_excel(nome_pesquisa +'.xlsx', index=False) 
 
-    def step_amount(self):   
+
         # Limpa a lista
         self.listaEvt.delete(*self.listaEvt.get_children())
 
@@ -298,6 +367,33 @@ class Funcs():
         for index, row in events.iterrows():
             # self.listaEvt.insert("", "end", values=(row['engUnit'], row['numericValue'], row['tagName'], row['timestamp'], row['value']))
             self.listaEvt.insert("", "end", values=(row['índice'],row['engUnit'], row['numericValue'], row['tagName'], row['timestamp'], row['value']))     
+
+    def load_list(self):
+        # Limpa a entry do filtro
+        self.filtro_entry.delete(0, END)
+        
+        # Janela para localizar a lista
+        caminho_list = tk.filedialog.askopenfilename(filetypes=[('Todos os arquivos', '*.*')])
+
+        
+        arquivos = glob.glob(caminho_list)
+        lista_evt = pd.read_excel(arquivos[0])
+
+        lista_evt['tag_name'] = '*' + lista_evt['SUBNAM'] + '*' + lista_evt['PNTNAM']        
+        
+        lista_evt.drop('SUBNAM', axis=1, inplace=True)
+        lista_evt.drop('PNTNAM', axis=1, inplace=True)
+        
+        self.tag_list = []
+        for index, row in lista_evt.iterrows():
+            print(index)
+            tag_name = self.tsws.get.tag_search(row.to_string(index=False)[1:47]).json()['tagResponse'][0]['tagName']           
+            self.tag_list.append(tag_name)
+
+        print('Lista de tags carregadas')
+
+
+
 
 
 
@@ -377,17 +473,12 @@ class Application(Funcs):
 
         self.step_amount_entry = Entry(self.frame_1)
         self.step_amount_entry.place(relx = 0.75, rely = 0.05, relwidth=0.2, relheight=0.12)
-        
+
 
 
         # Botões
-        self.bt_buscar = Button(self.frame_1, text="Buscar Eventos", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.buscar_evt)
-        self.bt_buscar.place(relx=0.13, rely = 0.8, relwidth = 0.2, relheight = 0.15)
-
-
-
         self.bt_clear = Button(self.frame_1, text="Limpar", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.limpa_tela)
-        self.bt_clear.place(relx=0.33, rely = 0.8, relwidth = 0.1, relheight = 0.15)
+        self.bt_clear.place(relx=0.50, rely = 0.8, relwidth = 0.1, relheight = 0.15)
 
 
 
@@ -396,16 +487,21 @@ class Application(Funcs):
 
 
 
-        self.bt_snapshot = Button(self.frame_1, text="Snapshot", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.toogle_snapshot)
-        self.bt_snapshot.place(relx=0.43, rely = 0.8, relwidth = 0.18, relheight = 0.15)
+        self.bt_snapshot = Button(self.frame_1, text="Iniciar Snapshot", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.toogle_snapshot)
+        self.bt_snapshot.place(relx=0.35, rely = 0.8, relwidth = 0.15, relheight = 0.15)
 
         self.snapshot_thread = None  # Thread para o loop de snapshot
         self.snapshot_running = False  # Variável de controle para o loop
 
 
 
-        self.bt_step_amount = Button(self.frame_1, text="Busca Analógica", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.step_amount)
-        self.bt_step_amount.place(relx=0.75, rely = 0.23, relwidth = 0.2, relheight = 0.15)
+        self.bt_buscar = Button(self.frame_1, text="Buscar Eventos", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.buscar_evt)
+        self.bt_buscar.place(relx=0.0, rely = 0.8, relwidth = 0.15, relheight = 0.15)
+
+
+
+        self.bt_get_list = Button(self.frame_1, text="Carregar Lista snap", bd=2, bg='#107db2', fg='white', font=('verdana', 8, 'bold'), command=self.load_list)
+        self.bt_get_list.place(relx=0.15, rely = 0.8, relwidth = 0.2, relheight = 0.15)
 
     def widgets_frame2(self):
 
