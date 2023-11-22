@@ -1,17 +1,13 @@
 """ 
     Itaipu Binacional - Operação de Usina e Subestações (OPUO.DT)
     Autores: Bruno Rovea, Bruno Gris 
-    Foz do Iguaçú, 28/Setembro/2023
+    Foz do Iguaçu, 28/Setembro/2023
     V1.0
 
-    
+    Tags de exemplo
     U10*TOMADA_DAGUA AGUAS EQUILIBRADAS*SV
     U10*TOMADA_DAGUA*SV
     *U05*excit*Corr*Av*
-
-    Problemas com o tag_search
-
-
 """
 
 #%%
